@@ -137,27 +137,20 @@ pacman -Sy ppp xl2tpd --needed --noconfirm || exiterr2
 # Install Fail2Ban to protect SSH server
 pacman -Sy fail2ban --needed --noconfirm || exiterr2
 
-
-
-# Compile and install Libreswan
+# Compile and install Libreswan from AUR
 swan_ver=3.18
-swan_file="libreswan-$swan_ver.tar.gz"
-swan_url1="https://download.libreswan.org/$swan_file"
-swan_url2="https://github.com/libreswan/libreswan/archive/v$swan_ver.tar.gz"
-wget -t 3 -T 30 -nv -O "$swan_file" "$swan_url1" || wget -t 3 -T 30 -nv -O "$swan_file" "$swan_url2"
-[ "$?" != "0" ] && exiterr "Cannot download Libreswan source."
-/bin/rm -rf "/opt/src/libreswan-$swan_ver"
-tar xzf "$swan_file" && /bin/rm -f "$swan_file"
-cd "libreswan-$swan_ver" || exiterr "Cannot enter Libreswan source dir."
-echo "WERROR_CFLAGS =" > Makefile.inc.local
-if [ "$(packaging/utils/lswan_detect.sh init)" = "systemd" ]; then
-  pacman -Sy libsystemd-dev || exiterr2
-fi
-make -s programs && make -s install
+aur_file="libreswan.tar.gz"
+aur_url="https://aur.archlinux.org/cgit/aur.git/snapshot/libreswan.tar.gz"
+wget -t 3 -T 30 -nv -O "$aur_file" "$aur_url"
+[ "$?" != "0" ] && exiterr "Cannot download Libreswan AUR snapshot."
+/bin/rm -rf "/opt/src/libreswan"
+tar xzf "$aur_file" && /bin/rm -f "$aur_file"
+cd "libreswan" || exiterr "Cannot enter Libreswan source dir."
+makepkg -sic --noconfirm --needed
 
 # Verify the install and clean up
 cd /opt/src || exiterr "Cannot enter /opt/src."
-/bin/rm -rf "/opt/src/libreswan-$swan_ver"
+/bin/rm -rf "/opt/src/libreswan"
 /usr/local/sbin/ipsec --version 2>/dev/null | grep -qs "$swan_ver"
 [ "$?" != "0" ] && exiterr "Libreswan $swan_ver failed to build."
 
