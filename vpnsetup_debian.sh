@@ -45,8 +45,9 @@ check_ip() {
   printf %s "$1" | tr -d '\n' | grep -Eq "$IP_REGEX"
 }
 
-if [ ! -f /etc/arch-release ]; then
-  exiterr "This script only supports Arch Linux."
+os_type="$(lsb_release -si 2>/dev/null)"
+if [ "$os_type" != "Ubuntu" ] && [ "$os_type" != "Debian" ] && [ "$os_type" != "Raspbian" ]; then
+  exiterr "This script only supports Ubuntu/Debian."
 fi
 
 if [ -f /proc/user_beancounters ]; then
@@ -98,6 +99,19 @@ case "$VPN_IPSEC_PSK $VPN_USER $VPN_PASSWORD" in
     exiterr "VPN credentials must not contain any of these characters: \\ \" '"
     ;;
 esac
+
+if [ "$(sed 's/\..*//' /etc/debian_version 2>/dev/null)" = "7" ]; then
+cat <<'EOF'
+IMPORTANT: Workaround required for Debian 7 (Wheezy).
+You must first run the script at: https://git.io/vpndeb7
+If not already done so, press Ctrl-C to interrupt now.
+
+Continuing in 30 seconds ...
+
+EOF
+  sleep 30
+fi
+
 echo "VPN setup in progress... Please be patient."
 echo
 
@@ -106,11 +120,12 @@ mkdir -p /opt/src
 cd /opt/src || exiterr "Cannot enter /opt/src."
 
 # Update package index
-pacman -Syy --noconfirm || exiterr "'pacman -Syy' failed."
+export DEBIAN_FRONTEND=noninteractive
+apt-get -yq update || exiterr "'apt-get update' failed."
 
 # Make sure basic commands exist
-pacman -Sy wget bind-tools openssl --needed --noconfirm || exiterr2
-pacman -Sy iproute2 gawk grep sed net-tools --needed --noconfirm || exiterr2
+apt-get -yq install wget dnsutils openssl || exiterr2
+apt-get -yq install iproute gawk grep sed net-tools || exiterr2
 
 cat <<'EOF'
 
@@ -137,31 +152,39 @@ check_ip "$PRIVATE_IP" || PRIVATE_IP=$(ifconfig "$NET_IF0" | grep -Eo 'inet (add
 check_ip "$PRIVATE_IP" || exiterr "Cannot find valid private IP. Edit the script and manually enter IPs."
 
 # Install necessary packages
-pacman -Sy libnss3-dev libnspr4-dev pkg-config libpam0g-dev \
+apt-get -yq install libnss3-dev libnspr4-dev pkg-config libpam0g-dev \
   libcap-ng-dev libcap-ng-utils libselinux1-dev \
   libcurl4-nss-dev flex bison gcc make \
-  libunbound-dev libnss3-tools libevent-dev xmlto --needed --noconfirm || exiterr2
-pacman -Sy ppp xl2tpd --needed --noconfirm || exiterr2
+  libunbound-dev libnss3-tools libevent-dev || exiterr2
+apt-get -yq --no-install-recommends install xmlto || exiterr2
+apt-get -yq install ppp xl2tpd || exiterr2
 
 # Install Fail2Ban to protect SSH server
-pacman -Sy fail2ban --needed --noconfirm || exiterr2
+apt-get -yq install fail2ban || exiterr2
 
-# Compile and install Libreswan from AUR
+# Compile and install Libreswan
 swan_ver=3.18
-aur_file="libreswan.tar.gz"
-aur_url="https://aur.archlinux.org/cgit/aur.git/snapshot/libreswan.tar.gz"
-wget -t 3 -T 30 -nv -O "$aur_file" "$aur_url"
-[ "$?" != "0" ] && exiterr "Cannot download Libreswan AUR snapshot."
-/bin/rm -rf "/opt/src/libreswan"
-tar xzf "$aur_file" && /bin/rm -f "$aur_file"
-cd "libreswan" || exiterr "Cannot enter Libreswan source dir."
-makepkg -sic --noconfirm --needed
+swan_file="libreswan-$swan_ver.tar.gz"
+swan_url1="https://download.libreswan.org/$swan_file"
+swan_url2="https://github.com/libreswan/libreswan/archive/v$swan_ver.tar.gz"
+if ! { wget -t 3 -T 30 -nv -O "$swan_file" "$swan_url1" || wget -t 3 -T 30 -nv -O "$swan_file" "$swan_url2"; }; then
+  exiterr "Cannot download Libreswan source."
+fi
+/bin/rm -rf "/opt/src/libreswan-$swan_ver"
+tar xzf "$swan_file" && /bin/rm -f "$swan_file"
+cd "libreswan-$swan_ver" || exiterr "Cannot enter Libreswan source dir."
+echo "WERROR_CFLAGS =" > Makefile.inc.local
+if [ "$(packaging/utils/lswan_detect.sh init)" = "systemd" ]; then
+  apt-get -yq install libsystemd-dev || exiterr2
+fi
+make -s programs && make -s install
 
 # Verify the install and clean up
 cd /opt/src || exiterr "Cannot enter /opt/src."
-/bin/rm -rf "/opt/src/libreswan"
-/usr/local/sbin/ipsec --version 2>/dev/null | grep -qs "$swan_ver"
-[ "$?" != "0" ] && exiterr "Libreswan $swan_ver failed to build."
+/bin/rm -rf "/opt/src/libreswan-$swan_ver"
+if ! /usr/local/sbin/ipsec --version 2>/dev/null | grep -qs "$swan_ver"; then
+  exiterr "Libreswan $swan_ver failed to build."
+fi
 
 # Create IPsec (Libreswan) config
 conf_bk "/etc/ipsec.conf"
@@ -373,6 +396,9 @@ service xl2tpd start
 echo 1 > /proc/sys/net/ipv4/ip_forward
 exit 0
 EOF
+  if grep -qs raspbian /etc/os-release; then
+    sed --follow-symlinks -i '/hwdsl2 VPN script/a sleep 15' /etc/rc.local
+  fi
 fi
 
 # Reload sysctl.conf
