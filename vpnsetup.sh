@@ -37,7 +37,7 @@ export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 SYS_DT="$(date +%Y-%m-%d-%H:%M:%S)"; export SYS_DT
 
 exiterr()  { echo "Error: $1" >&2; exit 1; }
-exiterr2() { echo "Error: 'apt-get install' failed." >&2; exit 1; }
+exiterr2() { echo "Error: 'pacman -Sy' failed." >&2; exit 1; }
 conf_bk() { /bin/cp -f "$1" "$1.old-$SYS_DT" 2>/dev/null; }
 
 check_ip() {
@@ -360,7 +360,6 @@ exit 0
 EOF
 
 # Start services at boot
-update-rc.d fail2ban enable >/dev/null 2>&1
 systemctl enable fail2ban >/dev/null 2>&1
 if ! grep -qs "hwdsl2 VPN script" /etc/rc.local; then
   conf_bk "/etc/rc.local"
